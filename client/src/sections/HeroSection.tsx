@@ -45,9 +45,9 @@ export default function HeroSection() {
         viewport={{ once: true }}
         transition={{ type: "spring", stiffness: 240, damping: 70, mass: 1 }}
       >
-        Free template to start your{" "}
+        AI thumbnail Generator for your{" "}
         <span className="move-gradient px-3 rounded-xl text-nowrap">
-          Next.js site.
+          Videos.
         </span>
       </motion.h1>
       <motion.p
@@ -63,8 +63,8 @@ export default function HeroSection() {
           mass: 1,
         }}
       >
-        No complexity. No noise. Just clean, reliable automation to boost your
-        team’s efficiency.
+        Create stunning, click-worthy thumbnails effortlessly with AI that
+        understands design, branding, and engagement.
       </motion.p>
       <motion.div
         className="flex items-center gap-4 mt-8"
@@ -74,11 +74,11 @@ export default function HeroSection() {
         transition={{ type: "spring", stiffness: 320, damping: 70, mass: 1 }}
       >
         <button className="bg-pink-600 hover:bg-pink-700 text-white rounded-full px-7 h-11">
-          Get started
+          Generate now
         </button>
         <button className="flex items-center gap-2 border border-pink-900 hover:bg-pink-950/50 transition rounded-full px-6 h-11">
           <VideoIcon strokeWidth={1} />
-          <span>Watch demo</span>
+          <span>See how it works</span>
         </button>
       </motion.div>
 
