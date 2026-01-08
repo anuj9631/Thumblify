@@ -2,8 +2,11 @@
 import { CheckIcon, ChevronRightIcon, VideoIcon } from "lucide-react";
 import TiltedImage from "../components/TiltImage";
 import { motion } from "motion/react";
+import { useNavigate } from "react-router-dom";
 
 export default function HeroSection() {
+  const navigate = useNavigate();
+
   const specialFeatures = [
     "No design skills needed",
     "Fast generation",
@@ -39,7 +42,7 @@ export default function HeroSection() {
         </p>
       </motion.a>
       <motion.h1
-        className="text-5xl/17 md:text-6xl/21 font-medium max-w-2xl text-center"
+        className="text-5xl/17 md:text-6xl/21 font-medium max-w-3xl text-center"
         initial={{ y: 50, opacity: 0 }}
         whileInView={{ y: 0, opacity: 1 }}
         viewport={{ once: true }}
@@ -73,7 +76,10 @@ export default function HeroSection() {
         viewport={{ once: true }}
         transition={{ type: "spring", stiffness: 320, damping: 70, mass: 1 }}
       >
-        <button className="bg-pink-600 hover:bg-pink-700 text-white rounded-full px-7 h-11">
+        <button
+          onClick={() => navigate("/generate")}
+          className="bg-pink-600 hover:bg-pink-700 text-white rounded-full px-7 h-11"
+        >
           Generate now
         </button>
         <button className="flex items-center gap-2 border border-pink-900 hover:bg-pink-950/50 transition rounded-full px-6 h-11">
