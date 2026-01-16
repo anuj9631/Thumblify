@@ -9,6 +9,7 @@ import {
 import SoftBackdrop from "../components/SoftBackdrop";
 import AspectRatioSelector from "../components/AspectRatioSelector";
 import StyleSelector from "../components/StyleSelector";
+import ColorSchemeSelector from "../components/ColorSchemeSelector";
 
 const Generate = () => {
   const { id } = useParams();
@@ -72,6 +73,10 @@ const Generate = () => {
                     setIsOpen={setStyleDropdownOpen}
                   />
                   {/*color scheme Selector*/}
+                  <ColorSchemeSelector
+                    value={colorSchmeId}
+                    onChange={setColorSchmeId}
+                  />
                   {/*Deatils */}
                   <div className="space-y-2">
                     <label className="block text-sm font-medium">
