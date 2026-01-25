@@ -31,30 +31,7 @@ Thumblify is a modern AI-based web application that helps creators generate eye-
 - Git & GitHub  
 - REST APIs  
 
----
 
-## 📂 Project Structure
-
-Thumblify/
-│
-├── client/ # Frontend (React)
-│ ├── src/
-│ ├── components/
-│ └── assets/
-│
-├── server/ # Backend (Node + Express)
-│ ├── routes/
-│ ├── controllers/
-│ └── index.js
-│
-├── .gitignore
-├── README.md
-└── package.json
-
-yaml
-Copy code
-
----
 
 ## ⚙️ Installation & Setup
 
@@ -78,8 +55,6 @@ npm start
 🔑 Environment Variables
 Create a .env file in the server directory:
 
-env
-Copy code
 PORT=5000
 API_KEY=your_api_key_here
 ⚠️ Make sure .env and node_modules are added to .gitignore.
