@@ -7,6 +7,11 @@ import {
   HarmCategory,
 } from "@google/genai";
 import ai from "../config/ai.js";
+import path from "node:path";
+
+import fs from 'fs';
+
+import { v2  as cloudinary} from "cloudinary";
 
 const stylePrompts ={
   "Bold & Graphic": "eye-catching thumbnail, bold typography, vibrant colors, expressive facial reaction, dramatic lighting, high contrast, click-worthy composition, professional style",
@@ -121,5 +126,38 @@ export const generateThumbnail = async (req: Request, res: Response) => {
     }
 
     const parts= response.candidates[0].content.parts;
-  } catch (error) {}
+
+    let finalBuffer: Buffer | null = null;
+    for(const part of parts){
+      if(part.inlineData){
+        finalBuffer = Buffer.from(part.inlineData.data,'base64')
+      }
+    }
+
+    const filename = `final-ouput-${Date.now()}.png`;
+    const filepath = path.join('image', filename)
+
+    //create a image directory if doesn't exist
+
+    fs.mkdirSync('images',{recursive: true})
+    //write the final i age to the file 
+
+    fs.writeFileSync(filepath,finalBuffer!);
+
+    const uploadResult = await cloudinary.uploader.upload(filename, {resource_type: 'image'})
+
+    thumbnail.image_url  = uploadResult.url;
+    thumbnail.isGenerating = false;
+    await thumbnail.save()
+    
+    res.json({message: 'Thumbnail Generated', thumbnail})
+
+    //remove image from disk
+    fs.unlinkSync(filepath)
+
+
+  } catch (error: any) {
+    console.log(error);
+    res.json(500).json({message: error.message});
+  }
 };
