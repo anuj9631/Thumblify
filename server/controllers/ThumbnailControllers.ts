@@ -1,8 +1,5 @@
 import Thumbnail from "../models/Thumbnail.js";
 import { Request, Response } from "express";
-import {
-  GenerateContentConfig,
-} from "@google/genai";
 import ai from "../config/ai.js";
 import path from "node:path";
 import fs from "fs";
@@ -11,16 +8,11 @@ import { v2 as cloudinary } from "cloudinary";
 /* -------------------- PROMPTS -------------------- */
 
 const stylePrompts = {
-  "Bold & Graphic":
-    "eye-catching thumbnail, bold typography, vibrant colors, expressive facial reaction, dramatic lighting, high contrast, click-worthy composition",
-  "Tech/Futuristic":
-    "futuristic thumbnail, sleek modern design, glowing accents, cyber-tech aesthetic, sharp lighting",
-  "Minimalist":
-    "minimalist thumbnail, clean layout, simple shapes, limited color palette, modern flat design",
-  "Photorealistic":
-    "photorealistic thumbnail, natural lighting, DSLR-style photography, shallow depth of field",
-  "Illustrated":
-    "illustrated thumbnail, stylized characters, bold outlines, vibrant colors, vector art style",
+  "Bold & Graphic": "eye-catching thumbnail, bold typography, vibrant colors, expressive facial reaction, dramatic lighting, high contrast, click-worthy composition",
+  "Tech/Futuristic": "futuristic thumbnail, sleek modern design, glowing accents, cyber-tech aesthetic, sharp lighting",
+  "Minimalist": "minimalist thumbnail, clean layout, simple shapes, limited color palette, modern flat design",
+  "Photorealistic": "photorealistic thumbnail, natural lighting, DSLR-style photography, shallow depth of field",
+  "Illustrated": "illustrated thumbnail, stylized characters, bold outlines, vibrant colors, vector art style",
 };
 
 const colorSchemeDescriptions = {
@@ -41,16 +33,9 @@ export const generateThumbnail = async (req: Request, res: Response) => {
 
   try {
     const { userId } = req.session;
-    const {
-      title,
-      prompt: user_prompt,
-      style,
-      aspect_ratio,
-      color_scheme,
-      text_overlay,
-    } = req.body;
+    const { title, prompt: user_prompt, style, aspect_ratio, color_scheme, text_overlay } = req.body;
 
-    // create DB record
+    // 1. Create DB record
     thumbnail = await Thumbnail.create({
       userId,
       title,
@@ -63,95 +48,72 @@ export const generateThumbnail = async (req: Request, res: Response) => {
       isGenerating: true,
     });
 
-    const model = "gemini-3-pro-image-preview";
+    // 2. INITIALIZE MODEL (This was the missing piece)
+    // Using imagen-3.0-generate-001 for high-quality thumbnails
+    const model = ai.getGenerativeModel({ model: "imagen-3.0-generate-001" });
 
-    const generationConfig: GenerateContentConfig = {
-      temperature: 1,
-      topP: 0.95,
-      responseModalities: ["IMAGE"],
-      imageConfig: {
-        aspectRatio: aspect_ratio || "16:9",
-        imageSize: "1K",
+    let prompt = `Create a ${stylePrompts[style as keyof typeof stylePrompts] || "bold"} thumbnail for "${title}". `;
+    if (color_scheme) prompt += `Use ${colorSchemeDescriptions[color_scheme as keyof typeof colorSchemeDescriptions]}. `;
+    if (user_prompt) prompt += `Additional details: ${user_prompt}. `;
+    prompt += "Make it bold, professional, visually stunning, and optimized for high click-through rate.";
+
+    // 3. CALL GENERATE
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseModalities: ["IMAGE"],
+        imageConfig: {
+          aspectRatio: aspect_ratio || "16:9",
+        },
       },
-    };
-
-    let prompt = `Create a ${
-      stylePrompts[style as keyof typeof stylePrompts]
-    } thumbnail for "${title}". `;
-
-    if (color_scheme) {
-      prompt += `Use ${colorSchemeDescriptions[color_scheme as keyof typeof colorSchemeDescriptions]}. `;
-    }
-
-    if (user_prompt) {
-      prompt += `Additional details: ${user_prompt}. `;
-    }
-
-    prompt +=
-      "Make it bold, professional, visually stunning, and optimized for high click-through rate.";
-
-    // call Gemini
-    const response: any = await ai.models.generateContent({
-      model,
-      contents: [prompt],
-      config: generationConfig,
     });
 
-    const parts = response?.candidates?.[0]?.content?.parts;
-    if (!parts) throw new Error("Invalid AI response");
+    const response = await result.response;
+    const part = response.candidates?.[0]?.content?.parts?.[0];
 
-    let imageBuffer: Buffer | null = null;
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        imageBuffer = Buffer.from(part.inlineData.data, "base64");
-      }
+    if (!part?.inlineData?.data) {
+      throw new Error("No image data returned from AI. Check your API key permissions.");
     }
 
-    if (!imageBuffer) throw new Error("No image returned from AI");
+    const imageBuffer = Buffer.from(part.inlineData.data, "base64");
 
-    // local file save
+    // 4. Save locally
     const imagesDir = path.join(process.cwd(), "images");
-    fs.mkdirSync(imagesDir, { recursive: true });
+    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
 
     const filename = `thumbnail-${Date.now()}.png`;
     const filepath = path.join(imagesDir, filename);
     fs.writeFileSync(filepath, imageBuffer);
 
-    // upload to cloudinary
+    // 5. Upload to Cloudinary
     const uploadResult = await cloudinary.uploader.upload(filepath, {
       resource_type: "image",
+      folder: "thumblify",
     });
 
-    // update DB
+    // 6. Update DB
     thumbnail.image_url = uploadResult.secure_url;
     thumbnail.isGenerating = false;
     await thumbnail.save();
 
-    // cleanup
-    fs.unlinkSync(filepath);
+    // 7. Cleanup
+    if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
 
-    return res.json({
-      message: "Thumbnail generated successfully",
-      thumbnail,
-    });
+    return res.json({ message: "Thumbnail generated successfully", thumbnail });
+
   } catch (error: any) {
-    console.error(error);
+    console.error("GENERATION_ERROR:", error);
 
-    // ensure DB is not stuck
     if (thumbnail) {
       thumbnail.isGenerating = false;
       await thumbnail.save();
     }
 
-    if (error.status === 429) {
-      return res.status(429).json({
-        message: "AI quota exceeded. Please try again later.",
-      });
+    if (error.status === 429 || error.message?.includes("quota")) {
+      return res.status(429).json({ message: "AI quota exceeded. Please wait a minute and try again." });
     }
 
-    return res.status(500).json({
-      message: error.message || "Thumbnail generation failed",
-    });
+    return res.status(500).json({ message: error.message || "Thumbnail generation failed" });
   }
 };
 
@@ -162,15 +124,13 @@ export const deleteThumbnail = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { userId } = req.session;
 
-    await Thumbnail.findOneAndDelete({ _id: id, userId });
+    const deleted = await Thumbnail.findOneAndDelete({ _id: id, userId });
+    
+    if (!deleted) return res.status(404).json({ message: "Thumbnail not found" });
 
-    return res.json({
-      message: "Thumbnail deleted successfully",
-    });
+    return res.json({ message: "Thumbnail deleted successfully" });
   } catch (error: any) {
     console.error(error);
-    return res.status(500).json({
-      message: error.message,
-    });
+    return res.status(500).json({ message: error.message });
   }
 };
