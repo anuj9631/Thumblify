@@ -19,27 +19,32 @@ await connectDB()
 
 const app = express();
 
+// 1. Core Middleware
 app.use(cors({
     origin: ['http://localhost:5173','http://localhost:3000/'],
     credentials: true
 }))
 
+app.use(express.json()) // Moved up to ensure it runs before routes
+app.use(express.urlencoded({ extended: true }))
+
+// 2. Session Setup
 app.use(session({
     secret: process.env.SESSION_SECRET as string,
     resave: false,
     saveUninitialized: false,
-    cookie:{maxAge: 1000 * 60 *60 *24 *7},//7  days
+    cookie:{maxAge: 1000 * 60 *60 *24 *7},//7 days
     store: MongoStore.create({
         mongoUrl:process.env.MONGODB_URI as string,
         collectionName: 'session'
     }) 
 }))
 
-app.use(express.json())
-
+// 3. Routes
 app.get('/', (req: Request, res: Response) => {
     res.send('Server is Live!');
 });
+
 app.use('/api/auth', AuthRouter)
 app.use('/api/thumbnail', ThumbnailRouter)
 app.use('/api/user', UserRouter)

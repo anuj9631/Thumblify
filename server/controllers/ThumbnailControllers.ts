@@ -1,42 +1,62 @@
 import Thumbnail from "../models/Thumbnail.js";
 import { Request, Response } from "express";
+import {
+  GenerateContentConfig,
+  HarmBlockThreshold,
+  HarmCategory,
+} from "@google/genai";
 import ai from "../config/ai.js";
 import path from "node:path";
 import fs from "fs";
 import { v2 as cloudinary } from "cloudinary";
 
-/* -------------------- PROMPTS -------------------- */
+// --- FIX: Configure Cloudinary explicitly so it doesn't crash ---
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 const stylePrompts = {
-  "Bold & Graphic": "eye-catching thumbnail, bold typography, vibrant colors, expressive facial reaction, dramatic lighting, high contrast, click-worthy composition",
-  "Tech/Futuristic": "futuristic thumbnail, sleek modern design, glowing accents, cyber-tech aesthetic, sharp lighting",
-  "Minimalist": "minimalist thumbnail, clean layout, simple shapes, limited color palette, modern flat design",
-  "Photorealistic": "photorealistic thumbnail, natural lighting, DSLR-style photography, shallow depth of field",
-  "Illustrated": "illustrated thumbnail, stylized characters, bold outlines, vibrant colors, vector art style",
+  "Bold & Graphic": "eye-catching thumbnail, bold typography, vibrant colors, expressive facial reaction, dramatic lighting, high contrast, click-worthy composition, professional style",
+  "Tech/Futuristic": "futuristic thumbnail, sleek modern design, digital UI elements, glowing accents, holographic effects, cyber-tech aesthetic, sharp lighting, high-tech atmosphere",
+  "Minimalist": "minimalist thumbnail, clean layout, simple shapes, limited color palette, plenty of negative space, modern flat design, clear focal point",
+  "Photorealistic": "photorealistic thumbnail, ultra-realistic lighting, natural skin tones, candid moment, DSLR-style photography, lifestyle realism, shallow depth of field",
+  "Illustrated": "illustrated thumbnail, custom digital illustration, stylized characters, bold outlines, vibrant colors, creative cartoon or vector art style",
 };
 
 const colorSchemeDescriptions = {
-  Vibrant: "vibrant energetic colors with high contrast",
-  Sunset: "warm sunset tones with orange and purple hues",
-  Forest: "natural green and earthy tones",
-  Neon: "neon glow effects with cyberpunk lighting",
-  Purple: "purple-dominant modern palette",
-  Monochrome: "black and white high contrast aesthetic",
-  Ocean: "cool blue and teal tones",
-  Pastel: "soft pastel colors with gentle tones",
+  Vibrant: "vibrant and energetic colors, high saturation, bold contrasts, eye-catching palette",
+  Sunset: "warm sunset tones, orange pink and purple hues, soft gradients, cinematic glow",
+  Forest: "natural green tones, earthy colors, calm and organic palette, fresh atmosphere",
+  Neon: "neon glow effects, electric blues and pinks, cyberpunk lighting, high contrast glow",
+  Purple: "purple-dominant color palette, magenta and violet tones, modern and stylish mood",
+  Monochrome: "black and white color scheme, high contrast, dramatic lighting, timeless aesthetic",
+  Ocean: "cool blue and teal tones, aquatic color palette, fresh and clean atmosphere",
+  Pastel: "soft pastel colors, low saturation, gentle tones, calm and friendly aesthetic",
 };
 
-/* -------------------- GENERATE THUMBNAIL -------------------- */
-
 export const generateThumbnail = async (req: Request, res: Response) => {
-  let thumbnail: any;
+  let thumbnailRecord: any = null;
 
   try {
-    const { userId } = req.session;
-    const { title, prompt: user_prompt, style, aspect_ratio, color_scheme, text_overlay } = req.body;
+    const { userId } = req.session as any;
 
-    // 1. Create DB record
-    thumbnail = await Thumbnail.create({
+    if (!userId) {
+      return res.status(401).json({ message: "No active session. Please login." });
+    }
+
+    const {
+      title,
+      prompt: user_prompt,
+      style,
+      aspect_ratio,
+      color_scheme,
+      text_overlay,
+    } = req.body;
+
+    // Create DB Record
+    thumbnailRecord = await Thumbnail.create({
       userId,
       title,
       prompt_used: user_prompt,
@@ -48,89 +68,95 @@ export const generateThumbnail = async (req: Request, res: Response) => {
       isGenerating: true,
     });
 
-    // 2. INITIALIZE MODEL (This was the missing piece)
-    // Using imagen-3.0-generate-001 for high-quality thumbnails
-    const model = ai.getGenerativeModel({ model: "imagen-3.0-generate-001" });
+    // You can try changing this model name if 'gemini-3-pro' is not found
+    // Common alternatives: "gemini-1.5-pro" or "imagen-3.0-generate-001"
+    const model = "gemini-2.5-flash-preview-image"; 
 
-    let prompt = `Create a ${stylePrompts[style as keyof typeof stylePrompts] || "bold"} thumbnail for "${title}". `;
-    if (color_scheme) prompt += `Use ${colorSchemeDescriptions[color_scheme as keyof typeof colorSchemeDescriptions]}. `;
-    if (user_prompt) prompt += `Additional details: ${user_prompt}. `;
-    prompt += "Make it bold, professional, visually stunning, and optimized for high click-through rate.";
+    const generationConfig: GenerateContentConfig = {
+      maxOutputTokens: 8192,
+      temperature: 1,
+      topP: 0.95,
+      responseModalities: ["IMAGE"],
+      safetySettings: [
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
+      ],
+    };
 
-    // 3. CALL GENERATE
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseModalities: ["IMAGE"],
-        imageConfig: {
-          aspectRatio: aspect_ratio || "16:9",
-        },
-      },
+    // Construct Prompt
+    let prompt = `Create a ${stylePrompts[style as keyof typeof stylePrompts] || "professional"} thumbnail for: "${title}".`;
+    if (color_scheme) prompt += ` Use a ${colorSchemeDescriptions[color_scheme as keyof typeof colorSchemeDescriptions]} color scheme.`;
+    if (user_prompt) prompt += ` Additional details: ${user_prompt}.`;
+    prompt += ` The thumbnail should be ${aspect_ratio || "16:9"}, visually stunning, and designed to maximize click-through rate.`;
+
+    // Call AI
+    const response: any = await ai.models.generateContent({
+      model,
+      contents: [prompt],
+      config: generationConfig,
     });
 
-    const response = await result.response;
-    const part = response.candidates?.[0]?.content?.parts?.[0];
-
-    if (!part?.inlineData?.data) {
-      throw new Error("No image data returned from AI. Check your API key permissions.");
+    if (!response?.candidates?.[0]?.content?.parts) {
+      throw new Error("Unexpected Gemini response");
     }
 
-    const imageBuffer = Buffer.from(part.inlineData.data, "base64");
+    const parts = response.candidates[0].content.parts;
+    let finalBuffer: Buffer | null = null;
 
-    // 4. Save locally
-    const imagesDir = path.join(process.cwd(), "images");
-    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        finalBuffer = Buffer.from(part.inlineData.data, "base64");
+      }
+    }
 
-    const filename = `thumbnail-${Date.now()}.png`;
-    const filepath = path.join(imagesDir, filename);
-    fs.writeFileSync(filepath, imageBuffer);
+    if (!finalBuffer) throw new Error("Image generation failed");
 
-    // 5. Upload to Cloudinary
+    // Save File locally
+    const filename = `final-output-${Date.now()}.png`;
+    const filepath = path.join("images", filename);
+    if (!fs.existsSync("images")) fs.mkdirSync("images");
+    fs.writeFileSync(filepath, finalBuffer);
+
+    // Upload to Cloudinary
     const uploadResult = await cloudinary.uploader.upload(filepath, {
       resource_type: "image",
-      folder: "thumblify",
     });
 
-    // 6. Update DB
-    thumbnail.image_url = uploadResult.secure_url;
-    thumbnail.isGenerating = false;
-    await thumbnail.save();
+    // Update DB
+    thumbnailRecord.image_url = uploadResult.secure_url;
+    thumbnailRecord.isGenerating = false;
+    await thumbnailRecord.save();
 
-    // 7. Cleanup
+    // Cleanup
     if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
 
-    return res.json({ message: "Thumbnail generated successfully", thumbnail });
+    res.json({ message: "Thumbnail generated", thumbnail: thumbnailRecord });
 
   } catch (error: any) {
-    console.error("GENERATION_ERROR:", error);
-
-    if (thumbnail) {
-      thumbnail.isGenerating = false;
-      await thumbnail.save();
+    console.error("GENERATION ERROR:", error);
+    
+    if (thumbnailRecord) {
+      await Thumbnail.findByIdAndUpdate(thumbnailRecord._id, { isGenerating: false });
     }
 
-    if (error.status === 429 || error.message?.includes("quota")) {
-      return res.status(429).json({ message: "AI quota exceeded. Please wait a minute and try again." });
-    }
-
-    return res.status(500).json({ message: error.message || "Thumbnail generation failed" });
+    res.status(500).json({ message: error.message });
   }
 };
-
-/* -------------------- DELETE THUMBNAIL -------------------- */
 
 export const deleteThumbnail = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { userId } = req.session;
+    const { userId } = req.session as any;
 
-    const deleted = await Thumbnail.findOneAndDelete({ _id: id, userId });
-    
-    if (!deleted) return res.status(404).json({ message: "Thumbnail not found" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    return res.json({ message: "Thumbnail deleted successfully" });
+    await Thumbnail.findOneAndDelete({ _id: id, userId });
+
+    res.json({ message: "Thumbnail deleted successfully" });
   } catch (error: any) {
     console.error(error);
-    return res.status(500).json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
