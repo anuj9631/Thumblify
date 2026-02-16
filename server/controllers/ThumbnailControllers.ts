@@ -4,19 +4,20 @@ import {
   GenerateContentConfig,
   HarmBlockThreshold,
   HarmCategory,
-} from "@google/genai";
+} from "@google/genai"; // (kept because you had it, not used now)
 import ai from "../config/ai.js";
 import path from "node:path";
 import fs from "fs";
 import { v2 as cloudinary } from "cloudinary";
 
-// --- FIX: Configure Cloudinary explicitly so it doesn't crash ---
+// ---------- Cloudinary config ----------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+// ---------- Style prompts ----------
 const stylePrompts = {
   "Bold & Graphic": "eye-catching thumbnail, bold typography, vibrant colors, expressive facial reaction, dramatic lighting, high contrast, click-worthy composition, professional style",
   "Tech/Futuristic": "futuristic thumbnail, sleek modern design, digital UI elements, glowing accents, holographic effects, cyber-tech aesthetic, sharp lighting, high-tech atmosphere",
@@ -25,6 +26,7 @@ const stylePrompts = {
   "Illustrated": "illustrated thumbnail, custom digital illustration, stylized characters, bold outlines, vibrant colors, creative cartoon or vector art style",
 };
 
+// ---------- Color schemes ----------
 const colorSchemeDescriptions = {
   Vibrant: "vibrant and energetic colors, high saturation, bold contrasts, eye-catching palette",
   Sunset: "warm sunset tones, orange pink and purple hues, soft gradients, cinematic glow",
@@ -36,6 +38,9 @@ const colorSchemeDescriptions = {
   Pastel: "soft pastel colors, low saturation, gentle tones, calm and friendly aesthetic",
 };
 
+// =====================================================
+// GENERATE THUMBNAIL
+// =====================================================
 export const generateThumbnail = async (req: Request, res: Response) => {
   let thumbnailRecord: any = null;
 
@@ -55,7 +60,7 @@ export const generateThumbnail = async (req: Request, res: Response) => {
       text_overlay,
     } = req.body;
 
-    // Create DB Record
+    // ---------- Create DB record ----------
     thumbnailRecord = await Thumbnail.create({
       userId,
       title,
@@ -68,75 +73,67 @@ export const generateThumbnail = async (req: Request, res: Response) => {
       isGenerating: true,
     });
 
-    // You can try changing this model name if 'gemini-3-pro' is not found
-    // Common alternatives: "gemini-1.5-pro" or "imagen-3.0-generate-001"
-    const model = "gemini-2.5-flash-preview-image"; 
-
-    const generationConfig: GenerateContentConfig = {
-      maxOutputTokens: 8192,
-      temperature: 1,
-      topP: 0.95,
-      responseModalities: ["IMAGE"],
-      safetySettings: [
-        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
-      ],
-    };
-
-    // Construct Prompt
+    // ---------- Build prompt ----------
     let prompt = `Create a ${stylePrompts[style as keyof typeof stylePrompts] || "professional"} thumbnail for: "${title}".`;
-    if (color_scheme) prompt += ` Use a ${colorSchemeDescriptions[color_scheme as keyof typeof colorSchemeDescriptions]} color scheme.`;
-    if (user_prompt) prompt += ` Additional details: ${user_prompt}.`;
+
+    if (color_scheme) {
+      prompt += ` Use a ${colorSchemeDescriptions[color_scheme as keyof typeof colorSchemeDescriptions]} color scheme.`;
+    }
+
+    if (user_prompt) {
+      prompt += ` Additional details: ${user_prompt}.`;
+    }
+
     prompt += ` The thumbnail should be ${aspect_ratio || "16:9"}, visually stunning, and designed to maximize click-through rate.`;
 
-    // Call AI
-    const response: any = await ai.models.generateContent({
-      model,
-      contents: [prompt],
-      config: generationConfig,
+    // =====================================================
+    // IMAGE GENERATION (FIXED — uses generateImages)
+    // =====================================================
+    const response: any = await ai.models.generateImages({
+      model: "imagen-3.0-generate-001",
+      prompt,
+      config: {
+        numberOfImages: 1,
+        outputMimeType: "image/png"
+      }
     });
 
-    if (!response?.candidates?.[0]?.content?.parts) {
-      throw new Error("Unexpected Gemini response");
+    const imageBase64 = response.generatedImages?.[0]?.image?.imageBytes;
+
+    if (!imageBase64) {
+      throw new Error("Image generation failed");
     }
 
-    const parts = response.candidates[0].content.parts;
-    let finalBuffer: Buffer | null = null;
+    const finalBuffer = Buffer.from(imageBase64, "base64");
 
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        finalBuffer = Buffer.from(part.inlineData.data, "base64");
-      }
-    }
-
-    if (!finalBuffer) throw new Error("Image generation failed");
-
-    // Save File locally
+    // ---------- Save locally ----------
     const filename = `final-output-${Date.now()}.png`;
     const filepath = path.join("images", filename);
+
     if (!fs.existsSync("images")) fs.mkdirSync("images");
     fs.writeFileSync(filepath, finalBuffer);
 
-    // Upload to Cloudinary
+    // ---------- Upload Cloudinary ----------
     const uploadResult = await cloudinary.uploader.upload(filepath, {
       resource_type: "image",
     });
 
-    // Update DB
+    // ---------- Update DB ----------
     thumbnailRecord.image_url = uploadResult.secure_url;
     thumbnailRecord.isGenerating = false;
     await thumbnailRecord.save();
 
-    // Cleanup
+    // ---------- Cleanup ----------
     if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
 
-    res.json({ message: "Thumbnail generated", thumbnail: thumbnailRecord });
+    res.json({
+      message: "Thumbnail generated",
+      thumbnail: thumbnailRecord
+    });
 
   } catch (error: any) {
     console.error("GENERATION ERROR:", error);
-    
+
     if (thumbnailRecord) {
       await Thumbnail.findByIdAndUpdate(thumbnailRecord._id, { isGenerating: false });
     }
@@ -145,6 +142,9 @@ export const generateThumbnail = async (req: Request, res: Response) => {
   }
 };
 
+// =====================================================
+// DELETE THUMBNAIL
+// =====================================================
 export const deleteThumbnail = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -155,6 +155,7 @@ export const deleteThumbnail = async (req: Request, res: Response) => {
     await Thumbnail.findOneAndDelete({ _id: id, userId });
 
     res.json({ message: "Thumbnail deleted successfully" });
+
   } catch (error: any) {
     console.error(error);
     res.status(500).json({ message: error.message });
