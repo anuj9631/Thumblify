@@ -31,37 +31,6 @@ Thumblify is a modern AI-based web application that helps creators generate eye-
 - Git & GitHub  
 - REST APIs  
 
-
-
-## ⚙️ Installation & Setup
-
-### 1️⃣ Clone the repository
-```bash
-git clone https://github.com/your-username/thumblify.git
-cd thumblify
-2️⃣ Install dependencies
-Frontend
-bash
-Copy code
-cd client
-npm install
-npm run dev
-Backend
-bash
-Copy code
-cd server
-npm install
-npm start
-🔑 Environment Variables
-Create a .env file in the server directory:
-
-PORT=5000
-API_KEY=your_api_key_here
-⚠️ Make sure .env and node_modules are added to .gitignore.
-
-📸 Screenshots
-Add screenshots of your UI here to make the README more attractive.
-
 🧠 Future Enhancements
 🔐 User authentication
 
